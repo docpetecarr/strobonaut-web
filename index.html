@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Strobonaut Web Prototype — ABPS Sweep</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #0a0a0a; color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  #setup {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; padding: 24px; box-sizing: border-box; text-align: center;
+  }
+  h1 { font-size: 1.3em; margin-bottom: 4px; letter-spacing: 0.05em; }
+  .sub { color: #999; font-size: 0.85em; margin-bottom: 20px; }
+  .warning {
+    background: #2a1414; border: 1px solid #7a2c2c; border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 20px; font-size: 0.85em; line-height: 1.5;
+    max-width: 380px; text-align: left;
+  }
+  .warning strong { color: #ff8a8a; }
+  .spec {
+    font-size: 0.8em; color: #bbb; line-height: 1.6; margin-bottom: 20px; max-width: 380px;
+  }
+  label.check {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 20px;
+    font-size: 0.85em; max-width: 380px;
+  }
+  button {
+    padding: 14px 32px; font-size: 1em; border-radius: 30px; border: none;
+    background: #444; color: #eee; margin-top: 10px; cursor: pointer;
+  }
+  button.primary { background: #7a2c2c; color: #fff; }
+  button:disabled { opacity: 0.4; }
+
+  /* Bilateral field */
+  #flicker {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    display: none;
+  }
+  #flicker .half {
+    position: absolute; top: 0; height: 100%; width: 50%;
+    background: #000;
+  }
+  #left  { left: 0; }
+  #right { left: 50%; }
+
+  #exitHint {
+    position: fixed; bottom: 20px; left: 0; width: 100%; text-align: center;
+    color: rgba(255,255,255,0.45); font-size: 0.75em; display: none;
+    pointer-events: none;
+    transition: opacity 2s;
+  }
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <h1>STROBONAUT — WEB PROTOTYPE</h1>
+  <div class="sub">Alternating bilateral photic stimulation with frequency sweep</div>
+
+  <div class="warning">
+    <strong>Photosensitive epilepsy warning.</strong> This screen flashes rhythmically.
+    Do not proceed if you or anyone in your family has a history of epilepsy or seizures.
+    Stop immediately and look away if you feel unwell, dizzy, or notice any twitching.
+    This is a demonstration prototype, not a clinical tool.
+  </div>
+
+  <div class="spec">
+    Left and right hemifields alternate red / black.<br>
+    Frequency sweeps 12 Hz → 6 Hz → 12 Hz, one minute per cycle.<br>
+    Hold the phone horizontally in a headset. Tap the screen to stop.
+  </div>
+
+  <label class="check">
+    <input type="checkbox" id="ack">
+    I understand the risk and wish to proceed
+  </label>
+
+  <button id="startBtn" class="primary" disabled>Start Flicker Run</button>
+</div>
+
+<div id="flicker">
+  <div class="half" id="left"></div>
+  <div class="half" id="right"></div>
+</div>
+<div id="exitHint">Tap anywhere to end the session</div>
+
+<script>
+// ---- Parameters ----
+const RED      = '#ff0000';   // nearest sRGB approximation of 660 nm
+const BLACK    = '#000000';
+const F_MAX    = 12;          // Hz
+const F_MIN    = 6;           // Hz
+const SWEEP_S  = 60;          // seconds per full triangular cycle (peak to peak)
+
+// ---- Elements ----
+const ack      = document.getElementById('ack');
+const startBtn = document.getElementById('startBtn');
+const setup    = document.getElementById('setup');
+const flicker  = document.getElementById('flicker');
+const left     = document.getElementById('left');
+const right    = document.getElementById('right');
+const exitHint = document.getElementById('exitHint');
+
+let wakeLock = null;
+let running  = false;
+let rafId    = null;
+
+ack.addEventListener('change', () => { startBtn.disabled = !ack.checked; });
+
+// ---- Triangular sweep: 12 -> 6 -> 12 over SWEEP_S seconds ----
+function frequencyAt(tSeconds) {
+  const phase = (tSeconds % SWEEP_S) / SWEEP_S;          // 0..1
+  const tri   = phase < 0.5 ? 1 - phase * 2 : (phase - 0.5) * 2; // 1 -> 0 -> 1
+  return F_MIN + (F_MAX - F_MIN) * tri;
+}
+
+// ---- Wake lock / fullscreen ----
+async function requestWakeLock() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }
+  catch (e) { console.log('Wake lock not available:', e); }
+}
+function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null; } }
+
+async function enterFullscreen() {
+  const el = document.documentElement;
+  try {
+    if (el.requestFullscreen) await el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+  } catch (e) { console.log('Fullscreen not available:', e); }
+}
+function exitFullscreen() {
+  if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+}
+
+// Re-acquire wake lock if the tab is backgrounded and returns
+document.addEventListener('visibilitychange', () => {
+  if (running && document.visibilityState === 'visible') requestWakeLock();
+});
+
+// ---- Flicker engine ----
+// Phase accumulation: each full cycle = one left flash + one right flash.
+// We toggle sides every half-cycle, so the frequency is the rate of full
+// left+right cycles. Change F_MAX/F_MIN if you define frequency per flash instead.
+function startFlicker() {
+  const t0 = performance.now();
+  let lastT = t0;
+  let phase = 0;          // in cycles
+  let leftOn = true;
+
+  function paint() {
+    left.style.background  = leftOn ? RED   : BLACK;
+    right.style.background = leftOn ? BLACK : RED;
+  }
+  paint();
+
+  function frame(now) {
+    if (!running) return;
+    const dt = (now - lastT) / 1000;
+    lastT = now;
+    const hz = frequencyAt((now - t0) / 1000);
+    phase += hz * dt;
+    if (phase >= 0.5) {
+      phase -= 0.5;
+      leftOn = !leftOn;
+      paint();
+    }
+    rafId = requestAnimationFrame(frame);
+  }
+  rafId = requestAnimationFrame(frame);
+}
+
+function stopFlicker() {
+  running = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  releaseWakeLock();
+  exitFullscreen();
+  flicker.style.display = 'none';
+  exitHint.style.display = 'none';
+  setup.style.display = 'flex';
+}
+
+startBtn.addEventListener('click', async () => {
+  await enterFullscreen();
+  await requestWakeLock();
+  setup.style.display = 'none';
+  flicker.style.display = 'block';
+  exitHint.style.display = 'block';
+  exitHint.style.opacity = '1';
+  setTimeout(() => { exitHint.style.opacity = '0'; }, 4000);
+  running = true;
+  startFlicker();
+});
+
+flicker.addEventListener('click', stopFlicker);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && running) stopFlicker(); });
+</script>
+
+</body>
+</html>
