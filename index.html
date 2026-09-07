@@ -3,48 +3,81 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Strobonaut Web Prototype — ABPS Sweep</title>
+<title>Strobonaut Web — Ganzflicker in your browser</title>
+<meta name="description" content="Ganzflicker meditation in your browser. Alternating bilateral photic stimulation with a 6-12 Hz frequency sweep. No app, no installation.">
 <style>
   html, body {
-    margin: 0; padding: 0; height: 100%; width: 100%;
+    margin: 0; padding: 0; min-height: 100%; width: 100%;
     background: #0a0a0a; color: #eee;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    overflow: hidden;
+    -webkit-text-size-adjust: 100%;
   }
+  body { overflow-x: hidden; }
+
   #setup {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    height: 100%; padding: 24px; box-sizing: border-box; text-align: center;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 28px 20px 40px; box-sizing: border-box; text-align: center;
   }
-  h1 { font-size: 1.3em; margin-bottom: 4px; letter-spacing: 0.05em; }
-  .sub { color: #999; font-size: 0.85em; margin-bottom: 20px; }
+  h1 { font-size: 1.25em; margin: 0 0 22px; letter-spacing: 0.06em; }
+
+  .panel { max-width: 400px; width: 100%; }
+
   .warning {
     background: #2a1414; border: 1px solid #7a2c2c; border-radius: 8px;
-    padding: 14px 16px; margin-bottom: 20px; font-size: 0.85em; line-height: 1.5;
-    max-width: 380px; text-align: left;
+    padding: 14px 16px; margin-bottom: 22px; font-size: 0.85em; line-height: 1.5;
+    text-align: left;
   }
   .warning strong { color: #ff8a8a; }
+
+  .checklist {
+    background: #14181c; border: 1px solid #2b3339; border-radius: 8px;
+    padding: 16px 18px; margin-bottom: 22px; text-align: left;
+  }
+  .checklist h2 {
+    font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.12em;
+    color: #7fb0c4; margin: 0 0 12px; font-weight: 600;
+  }
+  .checklist ul { margin: 0; padding: 0; list-style: none; }
+  .checklist li {
+    position: relative; padding-left: 22px; margin-bottom: 11px;
+    font-size: 0.85em; line-height: 1.45;
+  }
+  .checklist li:last-child { margin-bottom: 0; }
+  .checklist li::before {
+    content: "○"; position: absolute; left: 0; top: 0; color: #7fb0c4;
+  }
+  .checklist li b { color: #fff; font-weight: 600; }
+  .checklist li span { color: #8d979d; }
+
   .spec {
-    font-size: 0.8em; color: #bbb; line-height: 1.6; margin-bottom: 20px; max-width: 380px;
+    font-size: 0.78em; color: #8d979d; line-height: 1.6; margin-bottom: 22px;
   }
+
   label.check {
-    display: flex; align-items: center; gap: 8px; margin-bottom: 20px;
-    font-size: 0.85em; max-width: 380px;
+    display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px;
+    font-size: 0.85em; text-align: left; cursor: pointer;
   }
+  label.check input { margin-top: 2px; flex-shrink: 0; }
+
   button {
-    padding: 14px 32px; font-size: 1em; border-radius: 30px; border: none;
-    background: #444; color: #eee; margin-top: 10px; cursor: pointer;
+    padding: 15px 34px; font-size: 1em; border-radius: 30px; border: none;
+    background: #444; color: #eee; cursor: pointer; font-family: inherit;
   }
   button.primary { background: #7a2c2c; color: #fff; }
-  button:disabled { opacity: 0.4; }
+  button:disabled { opacity: 0.35; cursor: default; }
 
-  /* Bilateral field */
+  .footlink {
+    margin-top: 26px; font-size: 0.78em; color: #6d777d; line-height: 1.6;
+  }
+  .footlink a { color: #7fb0c4; }
+
+  /* Bilateral flicker field */
   #flicker {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    display: none;
+    display: none; z-index: 100;
   }
   #flicker .half {
-    position: absolute; top: 0; height: 100%; width: 50%;
-    background: #000;
+    position: absolute; top: 0; height: 100%; width: 50%; background: #000;
   }
   #left  { left: 0; }
   #right { left: 50%; }
@@ -52,36 +85,51 @@
   #exitHint {
     position: fixed; bottom: 20px; left: 0; width: 100%; text-align: center;
     color: rgba(255,255,255,0.45); font-size: 0.75em; display: none;
-    pointer-events: none;
-    transition: opacity 2s;
+    pointer-events: none; transition: opacity 2s; z-index: 101;
   }
 </style>
 </head>
 <body>
 
 <div id="setup">
-  <h1>STROBONAUT — WEB PROTOTYPE</h1>
-  <div class="sub">Alternating bilateral photic stimulation with frequency sweep</div>
+  <div class="panel">
+    <h1>STROBONAUT — WEB</h1>
 
-  <div class="warning">
-    <strong>Photosensitive epilepsy warning.</strong> This screen flashes rhythmically.
-    Do not proceed if you or anyone in your family has a history of epilepsy or seizures.
-    Stop immediately and look away if you feel unwell, dizzy, or notice any twitching.
-    This is a demonstration prototype, not a clinical tool.
+    <div class="warning">
+      <strong>Photosensitive epilepsy warning.</strong> This screen flashes rhythmically.
+      Do not proceed if you or anyone in your family has a history of epilepsy or seizures.
+    </div>
+
+    <div class="checklist">
+      <h2>Prepare your phone</h2>
+      <ul>
+        <li><b>Auto-rotate on.</b> <span>The display must lie in landscape so the two fields fall across your left and right eyes.</span></li>
+        <li><b>Brightness to maximum.</b> <span>A dim screen will not produce entrainment.</span></li>
+        <li><b>Screen timeout extended or off.</b> <span>This page tries to hold the screen awake, but not all phones allow it. On iPhone in particular, set it manually.</span></li>
+        <li><b>Silence notifications.</b> <span>Do Not Disturb, or flight mode with Wi-Fi left on.</span></li>
+        <li><b>Mount the phone in your headset</b> <span>before tapping Start, and settle yourself comfortably.</span></li>
+      </ul>
+    </div>
+
+    <div class="spec">
+      Left and right hemifields alternate red and black.<br>
+      Frequency sweeps 12 Hz → 6 Hz → 12 Hz, one minute per cycle.<br>
+      Tap the screen at any time to end the session.
+    </div>
+
+    <label class="check">
+      <input type="checkbox" id="ack">
+      I have read the safety warning and wish to proceed
+    </label>
+
+    <button id="startBtn" class="primary" disabled>Start Flicker Run</button>
+
+    <div class="footlink">
+      For fuller preparation, the launch sequence and the phenomenology of what you may see, visit
+      <a href="https://strobonaut.com/flicker-drive/">Flicker Drive</a> and
+      <a href="https://strobonaut.com/flickerspacewaypoints/">Flickerspace</a> at strobonaut.com.
+    </div>
   </div>
-
-  <div class="spec">
-    Left and right hemifields alternate red / black.<br>
-    Frequency sweeps 12 Hz → 6 Hz → 12 Hz, one minute per cycle.<br>
-    Hold the phone horizontally in a headset. Tap the screen to stop.
-  </div>
-
-  <label class="check">
-    <input type="checkbox" id="ack">
-    I understand the risk and wish to proceed
-  </label>
-
-  <button id="startBtn" class="primary" disabled>Start Flicker Run</button>
 </div>
 
 <div id="flicker">
@@ -92,11 +140,11 @@
 
 <script>
 // ---- Parameters ----
-const RED      = '#ff0000';   // nearest sRGB approximation of 660 nm
-const BLACK    = '#000000';
-const F_MAX    = 12;          // Hz
-const F_MIN    = 6;           // Hz
-const SWEEP_S  = 60;          // seconds per full triangular cycle (peak to peak)
+const RED     = '#ff0000';   // nearest sRGB approximation of 660 nm
+const BLACK   = '#000000';
+const F_MAX   = 12;          // Hz
+const F_MIN   = 6;           // Hz
+const SWEEP_S = 60;          // seconds per full triangular cycle (peak to peak)
 
 // ---- Elements ----
 const ack      = document.getElementById('ack');
@@ -115,8 +163,8 @@ ack.addEventListener('change', () => { startBtn.disabled = !ack.checked; });
 
 // ---- Triangular sweep: 12 -> 6 -> 12 over SWEEP_S seconds ----
 function frequencyAt(tSeconds) {
-  const phase = (tSeconds % SWEEP_S) / SWEEP_S;          // 0..1
-  const tri   = phase < 0.5 ? 1 - phase * 2 : (phase - 0.5) * 2; // 1 -> 0 -> 1
+  const phase = (tSeconds % SWEEP_S) / SWEEP_S;                    // 0..1
+  const tri   = phase < 0.5 ? 1 - phase * 2 : (phase - 0.5) * 2;   // 1 -> 0 -> 1
   return F_MIN + (F_MAX - F_MIN) * tri;
 }
 
@@ -125,7 +173,9 @@ async function requestWakeLock() {
   try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }
   catch (e) { console.log('Wake lock not available:', e); }
 }
-function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null; } }
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
 
 async function enterFullscreen() {
   const el = document.documentElement;
@@ -145,13 +195,13 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ---- Flicker engine ----
-// Phase accumulation: each full cycle = one left flash + one right flash.
-// We toggle sides every half-cycle, so the frequency is the rate of full
-// left+right cycles. Change F_MAX/F_MIN if you define frequency per flash instead.
+// Phase accumulation: one full cycle = one left flash + one right flash.
+// Sides toggle every half-cycle. If your APK defines frequency as the
+// switching rate instead, change the 0.5 threshold below to 1.
 function startFlicker() {
   const t0 = performance.now();
-  let lastT = t0;
-  let phase = 0;          // in cycles
+  let lastT  = t0;
+  let phase  = 0;
   let leftOn = true;
 
   function paint() {
@@ -164,8 +214,7 @@ function startFlicker() {
     if (!running) return;
     const dt = (now - lastT) / 1000;
     lastT = now;
-    const hz = frequencyAt((now - t0) / 1000);
-    phase += hz * dt;
+    phase += frequencyAt((now - t0) / 1000) * dt;
     if (phase >= 0.5) {
       phase -= 0.5;
       leftOn = !leftOn;
