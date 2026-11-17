@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Strobonaut Web — Synchronous strobe</title>
+<meta name="description" content="Ganzflicker meditation in your browser. Synchronous bilateral photic stimulation with a 6-12 Hz frequency sweep. No app, no installation.">
+<style>
+  html, body {
+    margin: 0; padding: 0; min-height: 100%; width: 100%;
+    background: #0a0a0a; color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  body { overflow-x: hidden; }
+
+  #setup {
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 28px 20px 40px; box-sizing: border-box; text-align: center;
+  }
+  h1 { font-size: 1.25em; margin: 0 0 22px; letter-spacing: 0.06em; }
+
+  .panel { max-width: 400px; width: 100%; }
+
+  .warning {
+    background: #2a1414; border: 1px solid #7a2c2c; border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 22px; font-size: 0.85em; line-height: 1.5;
+    text-align: left;
+  }
+  .warning strong { color: #ff8a8a; }
+
+  .checklist {
+    background: #14181c; border: 1px solid #2b3339; border-radius: 8px;
+    padding: 16px 18px; margin-bottom: 22px; text-align: left;
+  }
+  .checklist h2 {
+    font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.12em;
+    color: #7fb0c4; margin: 0 0 12px; font-weight: 600;
+  }
+  .checklist ul { margin: 0; padding: 0; list-style: none; }
+  .checklist li {
+    position: relative; padding-left: 22px; margin-bottom: 11px;
+    font-size: 0.85em; line-height: 1.45;
+  }
+  .checklist li:last-child { margin-bottom: 0; }
+  .checklist li::before {
+    content: "○"; position: absolute; left: 0; top: 0; color: #7fb0c4;
+  }
+  .checklist li b { color: #fff; font-weight: 600; }
+  .checklist li span { color: #8d979d; }
+
+  .spec {
+    font-size: 0.78em; color: #8d979d; line-height: 1.6; margin-bottom: 22px;
+  }
+
+  label.check {
+    display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px;
+    font-size: 0.85em; text-align: left; cursor: pointer;
+  }
+  label.check input { margin-top: 2px; flex-shrink: 0; }
+
+  button {
+    padding: 15px 34px; font-size: 1em; border-radius: 30px; border: none;
+    background: #444; color: #eee; cursor: pointer; font-family: inherit;
+  }
+  button.primary { background: #7a2c2c; color: #fff; }
+  button:disabled { opacity: 0.35; cursor: default; }
+
+  .footlink {
+    margin-top: 26px; font-size: 0.78em; color: #6d777d; line-height: 1.6;
+  }
+  .footlink a { color: #7fb0c4; }
+
+  /* Bilateral flicker field */
+  #flicker {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    display: none; z-index: 100;
+  }
+  #flicker .half {
+    position: absolute; top: 0; height: 100%; width: 50%; background: #000;
+  }
+  #left  { left: 0; }
+  #right { left: 50%; }
+
+  #exitHint {
+    position: fixed; bottom: 20px; left: 0; width: 100%; text-align: center;
+    color: rgba(255,255,255,0.45); font-size: 0.75em; display: none;
+    pointer-events: none; transition: opacity 2s; z-index: 101;
+  }
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <div class="panel">
+    <h1>STROBONAUT — WEB (SYNCHRONOUS)</h1>
+
+    <div class="warning">
+      <strong>Photosensitive epilepsy warning.</strong> This screen flashes rhythmically.
+      Do not proceed if you or anyone in your family has a history of epilepsy or seizures.
+    </div>
+
+    <div class="checklist">
+      <h2>Prepare your phone</h2>
+      <ul>
+        <li><b>Auto-rotate on.</b> <span>The display must lie in landscape so the two fields fall across your left and right eyes.</span></li>
+        <li><b>Brightness to maximum.</b> <span>A dim screen will not produce entrainment.</span></li>
+        <li><b>Screen timeout extended or off.</b> <span>This page tries to hold the screen awake, but not all phones allow it. On iPhone in particular, set it manually.</span></li>
+        <li><b>Low Power Mode / battery saver off.</b> <span>Power saving can halve the screen's drawing rate, which makes the flicker uneven.</span></li>
+        <li><b>Silence notifications.</b> <span>Do Not Disturb, or flight mode with Wi-Fi left on.</span></li>
+        <li><b>Mount the phone in your headset</b> <span>before tapping Start, and settle yourself comfortably.</span></li>
+      </ul>
+    </div>
+
+    <div class="spec">
+      Left and right hemifields flash red and black together.<br>
+      Frequency sweeps 12 Hz → 6 Hz → 12 Hz, one minute per cycle.<br>
+      Tap the screen at any time to end the session.
+    </div>
+
+    <div class="spec" id="lastRun" style="display:none; color:#b9c4c9;"></div>
+
+    <label class="check">
+      <input type="checkbox" id="ack">
+      I have read the safety warning and wish to proceed
+    </label>
+
+    <button id="startBtn" class="primary" disabled>Start Flicker Run</button>
+
+    <div class="footlink">
+      For fuller preparation, the launch sequence and the phenomenology of what you may see, visit
+      <a href="https://strobonaut.com/flicker-drive/">Flicker Drive</a> and
+      <a href="https://strobonaut.com/flickerspacewaypoints/">Flickerspace</a> at strobonaut.com.
+    </div>
+  </div>
+</div>
+
+<div id="flicker">
+  <div class="half" id="left"></div>
+  <div class="half" id="right"></div>
+</div>
+<div id="exitHint">Tap anywhere to end the session</div>
+
+<script>
+// ---- Parameters ----
+const RED     = '#ff0000';   // nearest sRGB approximation of 660 nm
+const BLACK   = '#000000';
+const F_MAX   = 12;          // Hz
+const F_MIN   = 6;           // Hz
+const SWEEP_S = 60;          // seconds per full triangular cycle (peak to peak)
+
+// ---- Elements ----
+const ack      = document.getElementById('ack');
+const startBtn = document.getElementById('startBtn');
+const setup    = document.getElementById('setup');
+const flicker  = document.getElementById('flicker');
+const left     = document.getElementById('left');
+const right    = document.getElementById('right');
+const exitHint = document.getElementById('exitHint');
+const lastRun  = document.getElementById('lastRun');
+
+let wakeLock = null;
+let running  = false;
+let rafId    = null;
+
+ack.addEventListener('change', () => { startBtn.disabled = !ack.checked; });
+
+// ---- Triangular sweep: 12 -> 6 -> 12 over SWEEP_S seconds ----
+// cyclesAt(t) is the exact number of flicker cycles completed after t seconds,
+// i.e. the integral of the triangular frequency ramp. Computing it directly
+// (rather than adding up small steps) means rounding errors can never build up.
+const CYCLES_PER_SWEEP = SWEEP_S * (F_MAX + F_MIN) / 2;
+function cyclesAt(tSeconds) {
+  const k = Math.floor(tSeconds / SWEEP_S);
+  const u = tSeconds - k * SWEEP_S;              // time within this sweep
+  const half = SWEEP_S / 2, dF = F_MAX - F_MIN;
+  let c;
+  if (u < half) {                                // falling 12 -> 6
+    c = F_MAX * u - dF * u * u / SWEEP_S;
+  } else {                                       // rising 6 -> 12
+    const w = u - half;
+    c = CYCLES_PER_SWEEP / 2 + F_MIN * w + dF * w * w / SWEEP_S;
+  }
+  return k * CYCLES_PER_SWEEP + c;
+}
+
+// ---- Wake lock / fullscreen ----
+async function requestWakeLock() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }
+  catch (e) { console.log('Wake lock not available:', e); }
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
+
+async function enterFullscreen() {
+  const el = document.documentElement;
+  try {
+    if (el.requestFullscreen) await el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+  } catch (e) { console.log('Fullscreen not available:', e); }
+}
+function exitFullscreen() {
+  if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+}
+
+// Re-acquire wake lock if the tab is backgrounded and returns
+document.addEventListener('visibilitychange', () => {
+  if (running && document.visibilityState === 'visible') requestWakeLock();
+});
+
+// ---- Flicker engine ----
+// One full cycle = both fields red, then both black. Each eye receives the
+// same number of flashes per second as in the alternating version; only the
+// timing between the two eyes differs.
+// The screen can only change colour at its own refresh ticks (usually every
+// 16.7 ms at 60 Hz, or 8.3 ms at 120 Hz). The engine therefore works on a
+// frame-locked clock:
+//   * it measures the display's real refresh interval (median of recent frames),
+//   * each frame advances the clock by a whole number of refresh intervals,
+//     so small timing noise in the browser cannot nudge a switch early or late,
+//   * a dropped frame advances the clock by two (or more) intervals, so the
+//     flicker stays in step instead of bursting to catch up,
+//   * the red/black state is read directly from cyclesAt(), so it is always
+//     correct for the current moment however the previous frames went.
+const DELTA_SAMPLES = 31;
+let stats = null;
+
+function startFlicker() {
+  const deltas = [];
+  let T       = 1000 / 60;   // refresh interval estimate (ms), refined below
+  let lastNow = null;
+  let vt      = 0;           // frame-locked session time (ms)
+  let leftOn  = true;
+  stats = { start: performance.now(), dropped: 0, T: T };
+
+  function paint() {
+    left.style.background  = leftOn ? RED : BLACK;
+    right.style.background = leftOn ? RED : BLACK;
+  }
+  paint();
+
+  function frame(now) {
+    if (!running) return;
+    if (lastNow !== null) {
+      const dt = now - lastNow;
+      deltas.push(dt);
+      if (deltas.length > DELTA_SAMPLES) deltas.shift();
+      if (deltas.length >= 5) {
+        const s = deltas.slice().sort((a, b) => a - b);
+        T = s[s.length >> 1];
+        stats.T = T;
+      }
+      const steps = Math.max(1, Math.round(dt / T));
+      if (steps > 1 && steps < 60) stats.dropped += steps - 1;
+      vt += steps * T;
+    }
+    lastNow = now;
+    const on = (cyclesAt(vt / 1000) % 1) < 0.5;
+    if (on !== leftOn) { leftOn = on; paint(); }
+    rafId = requestAnimationFrame(frame);
+  }
+  rafId = requestAnimationFrame(frame);
+}
+
+function reportLastRun() {
+  if (!stats) return;
+  const mins = (performance.now() - stats.start) / 60000;
+  const hz = Math.round(1000 / stats.T);
+  let msg = 'Last run: ' + mins.toFixed(1) + ' min, display refreshing at about ' + hz +
+            ' Hz, ' + stats.dropped + ' dropped frame' + (stats.dropped === 1 ? '' : 's') + '.';
+  if (hz < 50) msg += ' The browser was drawing too slowly for clean flicker: check that ' +
+                      'Low Power Mode / battery saver is off.';
+  lastRun.textContent = msg;
+  lastRun.style.display = 'block';
+}
+
+function stopFlicker() {
+  running = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  releaseWakeLock();
+  exitFullscreen();
+  flicker.style.display = 'none';
+  exitHint.style.display = 'none';
+  setup.style.display = 'flex';
+  reportLastRun();
+}
+
+startBtn.addEventListener('click', async () => {
+  await enterFullscreen();
+  await requestWakeLock();
+  setup.style.display = 'none';
+  flicker.style.display = 'block';
+  exitHint.style.display = 'block';
+  exitHint.style.opacity = '1';
+  setTimeout(() => { exitHint.style.opacity = '0'; }, 4000);
+  running = true;
+  startFlicker();
+});
+
+flicker.addEventListener('click', stopFlicker);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && running) stopFlicker(); });
+</script>
+
+</body>
+</html>
