@@ -106,6 +106,7 @@
         <li><b>Auto-rotate on.</b> <span>The display must lie in landscape so the two fields fall across your left and right eyes.</span></li>
         <li><b>Brightness to maximum.</b> <span>A dim screen will not produce entrainment.</span></li>
         <li><b>Screen timeout extended or off.</b> <span>This page tries to hold the screen awake, but not all phones allow it. On iPhone in particular, set it manually.</span></li>
+        <li><b>Low Power Mode / battery saver off.</b> <span>Power saving can halve the screen's drawing rate, which makes the flicker uneven.</span></li>
         <li><b>Silence notifications.</b> <span>Do Not Disturb, or flight mode with Wi-Fi left on.</span></li>
         <li><b>Mount the phone in your headset</b> <span>before tapping Start, and settle yourself comfortably.</span></li>
       </ul>
@@ -116,6 +117,8 @@
       Frequency sweeps 12 Hz → 6 Hz → 12 Hz, one minute per cycle.<br>
       Tap the screen at any time to end the session.
     </div>
+
+    <div class="spec" id="lastRun" style="display:none; color:#b9c4c9;"></div>
 
     <label class="check">
       <input type="checkbox" id="ack">
@@ -154,6 +157,7 @@ const flicker  = document.getElementById('flicker');
 const left     = document.getElementById('left');
 const right    = document.getElementById('right');
 const exitHint = document.getElementById('exitHint');
+const lastRun  = document.getElementById('lastRun');
 
 let wakeLock = null;
 let running  = false;
@@ -162,10 +166,22 @@ let rafId    = null;
 ack.addEventListener('change', () => { startBtn.disabled = !ack.checked; });
 
 // ---- Triangular sweep: 12 -> 6 -> 12 over SWEEP_S seconds ----
-function frequencyAt(tSeconds) {
-  const phase = (tSeconds % SWEEP_S) / SWEEP_S;                    // 0..1
-  const tri   = phase < 0.5 ? 1 - phase * 2 : (phase - 0.5) * 2;   // 1 -> 0 -> 1
-  return F_MIN + (F_MAX - F_MIN) * tri;
+// cyclesAt(t) is the exact number of flicker cycles completed after t seconds,
+// i.e. the integral of the triangular frequency ramp. Computing it directly
+// (rather than adding up small steps) means rounding errors can never build up.
+const CYCLES_PER_SWEEP = SWEEP_S * (F_MAX + F_MIN) / 2;
+function cyclesAt(tSeconds) {
+  const k = Math.floor(tSeconds / SWEEP_S);
+  const u = tSeconds - k * SWEEP_S;              // time within this sweep
+  const half = SWEEP_S / 2, dF = F_MAX - F_MIN;
+  let c;
+  if (u < half) {                                // falling 12 -> 6
+    c = F_MAX * u - dF * u * u / SWEEP_S;
+  } else {                                       // rising 6 -> 12
+    const w = u - half;
+    c = CYCLES_PER_SWEEP / 2 + F_MIN * w + dF * w * w / SWEEP_S;
+  }
+  return k * CYCLES_PER_SWEEP + c;
 }
 
 // ---- Wake lock / fullscreen ----
@@ -195,14 +211,29 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ---- Flicker engine ----
-// Phase accumulation: one full cycle = both fields red, then both black.
-// Each eye receives the same number of flashes per second as in the
-// alternating version; only the timing between the two eyes differs.
+// One full cycle = both fields red, then both black. Each eye receives the
+// same number of flashes per second as in the alternating version; only the
+// timing between the two eyes differs.
+// The screen can only change colour at its own refresh ticks (usually every
+// 16.7 ms at 60 Hz, or 8.3 ms at 120 Hz). The engine therefore works on a
+// frame-locked clock:
+//   * it measures the display's real refresh interval (median of recent frames),
+//   * each frame advances the clock by a whole number of refresh intervals,
+//     so small timing noise in the browser cannot nudge a switch early or late,
+//   * a dropped frame advances the clock by two (or more) intervals, so the
+//     flicker stays in step instead of bursting to catch up,
+//   * the red/black state is read directly from cyclesAt(), so it is always
+//     correct for the current moment however the previous frames went.
+const DELTA_SAMPLES = 31;
+let stats = null;
+
 function startFlicker() {
-  const t0 = performance.now();
-  let lastT  = t0;
-  let phase  = 0;
-  let leftOn = true;
+  const deltas = [];
+  let T       = 1000 / 60;   // refresh interval estimate (ms), refined below
+  let lastNow = null;
+  let vt      = 0;           // frame-locked session time (ms)
+  let leftOn  = true;
+  stats = { start: performance.now(), dropped: 0, T: T };
 
   function paint() {
     left.style.background  = leftOn ? RED : BLACK;
@@ -212,17 +243,37 @@ function startFlicker() {
 
   function frame(now) {
     if (!running) return;
-    const dt = (now - lastT) / 1000;
-    lastT = now;
-    phase += frequencyAt((now - t0) / 1000) * dt;
-    if (phase >= 0.5) {
-      phase -= 0.5;
-      leftOn = !leftOn;
-      paint();
+    if (lastNow !== null) {
+      const dt = now - lastNow;
+      deltas.push(dt);
+      if (deltas.length > DELTA_SAMPLES) deltas.shift();
+      if (deltas.length >= 5) {
+        const s = deltas.slice().sort((a, b) => a - b);
+        T = s[s.length >> 1];
+        stats.T = T;
+      }
+      const steps = Math.max(1, Math.round(dt / T));
+      if (steps > 1 && steps < 60) stats.dropped += steps - 1;
+      vt += steps * T;
     }
+    lastNow = now;
+    const on = (cyclesAt(vt / 1000) % 1) < 0.5;
+    if (on !== leftOn) { leftOn = on; paint(); }
     rafId = requestAnimationFrame(frame);
   }
   rafId = requestAnimationFrame(frame);
+}
+
+function reportLastRun() {
+  if (!stats) return;
+  const mins = (performance.now() - stats.start) / 60000;
+  const hz = Math.round(1000 / stats.T);
+  let msg = 'Last run: ' + mins.toFixed(1) + ' min, display refreshing at about ' + hz +
+            ' Hz, ' + stats.dropped + ' dropped frame' + (stats.dropped === 1 ? '' : 's') + '.';
+  if (hz < 50) msg += ' The browser was drawing too slowly for clean flicker: check that ' +
+                      'Low Power Mode / battery saver is off.';
+  lastRun.textContent = msg;
+  lastRun.style.display = 'block';
 }
 
 function stopFlicker() {
@@ -233,6 +284,7 @@ function stopFlicker() {
   flicker.style.display = 'none';
   exitHint.style.display = 'none';
   setup.style.display = 'flex';
+  reportLastRun();
 }
 
 startBtn.addEventListener('click', async () => {
